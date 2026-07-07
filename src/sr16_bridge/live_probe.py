@@ -231,9 +231,17 @@ class _Central(NSObject):
 
 
 def _send_packet(central, packet: bytes) -> None:
-    """Write a packet to FF02 (RX char). NSData wraps the bytes."""
+    """Write a packet to FF02 (RX char). NSData wraps the bytes.
+
+    The Obj-C selector is `writeValue:forCharacteristic:type:` — three args,
+    not the Swift convenience `writeValue(_:for:type:)` which is what
+    `writeValue_forCharacteristic_withResponse_` would imply.
+    PyObjC binding: `writeValue_forCharacteristic_type_(data, char, type)`.
+    `type` is a CBCharacteristicWriteType enum: 0=withResponse, 1=withoutResponse.
+    We use withResponse (=0) so we get a write ack via the delegate callback.
+    """
     data = NSDataClass.dataWithBytes_length_(packet, len(packet))
-    central.peripheral.writeValue_forCharacteristic_withResponse_(data, central.ff02_char, True)
+    central.peripheral.writeValue_forCharacteristic_type_(data, central.ff02_char, 0)
     print(f"[TX] {packet.hex()}")
 
 

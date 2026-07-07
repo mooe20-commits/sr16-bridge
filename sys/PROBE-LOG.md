@@ -34,3 +34,21 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
 ### GATT enumerate run at 2026-07-07T10:58:11.602050+00:00
 
 ### GATT enumerate run at 2026-07-07T10:58:58.134148+00:00
+
+### GATT enumerate run at 2026-07-07T11:11:24.592321+00:00
+
+#### analyze run @ 2026-07-07T11:40:00.008855+00:00
+  device=ALL  model=Qwen3.5-9B-Claude-4.6-HighIQ-HERETIC:latest
+  rows_in=60  windows=1  dry_run=False
+
+#### analyze run @ 2026-07-07T11:40:41.997983+00:00
+  device=ALL  model=Qwen3.5-9B-Claude-4.6-HighIQ-HERETIC:latest
+  rows_in=8  windows=1  dry_run=False
+
+#### analyze run @ 2026-07-07T11:41:36.859285+00:00
+  device=ALL  model=Qwen3.5-9B-Claude-4.6-HighIQ-HERETIC:latest
+  rows_in=12  windows=1  dry_run=False
+
+#### analyze run @ 2026-07-07T11:41:56.548213+00:00
+  device=ALL  model=Qwen3.5-9B-Claude-4.6-HighIQ-HERETIC:latest
+  rows_in=15  windows=1  dry_run=False

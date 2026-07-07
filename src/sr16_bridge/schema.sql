@@ -1,6 +1,9 @@
 -- SR16 bridge SQLite schema. Reference doc, kept in sync via `init_db.py`.
 -- Goals: queryable (HR + sessions + history), append-only at the row level.
 -- One opt-in destructive hatch: drop_stats() in stats.py.
+--
+-- Migrations live in `migrate()` inside each command (not here) because CREATE TABLE IF NOT EXISTS
+-- is a no-op on existing tables — adding new columns needs PRAGMA-guarded ALTERs.
 
 PRAGMA journal_mode = WAL;       -- concurrent reads while a writer is active
 PRAGMA synchronous  = NORMAL;     -- safe with WAL on macOS
@@ -18,10 +21,12 @@ CREATE TABLE IF NOT EXISTS hr_readings (
     sensor_contact  INTEGER,                  -- 0x2A37 byte[2] bits 0-1 (0=unknown,1=not detected,2=ok)
     energy_expended INTEGER,                  -- optional flag bit + 2-byte value
     raw_hex         TEXT,                     -- full notify payload (for offline RE)
-    ingested_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    ingested_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    analyzed_at     TEXT                     -- ISO8601 set by analyze.py once batch has been processed
 );
 CREATE INDEX IF NOT EXISTS hr_readings_ts ON hr_readings(ts_utc);
 CREATE INDEX IF NOT EXISTS hr_readings_device_ts ON hr_readings(device_uuid, ts_utc);
+CREATE INDEX IF NOT EXISTS hr_readings_unanalyzed ON hr_readings(analyzed_at) WHERE analyzed_at IS NULL;
 
 -- GATT characteristic inventory: a snapshot of everything we saw on the ring at enumerate-time.
 -- Used as the source of truth for "what services does the SR16 expose?" so subsequent
@@ -46,4 +51,29 @@ CREATE TABLE IF NOT EXISTS ble_sessions (
     ended_at        TEXT,
     reason          TEXT,
     bytes_received  INTEGER NOT NULL DEFAULT 0
+);
+
+-- One row per analysis pass — output of analyze.py. A pass consumes a window of unanalyzed
+-- hr_readings rows, calls the local Ollama model, and writes both a free-form response and a
+-- structured summary (avg_bpm, peak_bpm, resting_bpm, rmssd, anomaly). Links back via window_start/end.
+CREATE TABLE IF NOT EXISTS analysis_runs (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at      TEXT    NOT NULL,
+    finished_at     TEXT,
+    rows_analyzed   INTEGER NOT NULL DEFAULT 0,
+    window_start_ts TEXT    NOT NULL,         -- inclusive
+    window_end_ts   TEXT    NOT NULL,         -- exclusive
+    model_id        TEXT    NOT NULL,         -- e.g. 'Qwen3.5-9B-Claude-4.6-HighIQ-HERETIC:latest'
+    prompt          TEXT    NOT NULL,         -- full prompt we sent
+    response        TEXT,                     -- raw model output
+    summary_json    TEXT,                     -- validated JSON: {"avg_bpm":..,"peak_bpm":..,"resting_bpm":..,"rmssd_ms":..,"anomaly":..,"note":..}
+    error           TEXT
+);
+CREATE INDEX IF NOT EXISTS analysis_runs_window ON analysis_runs(window_start_ts, window_end_ts);
+
+-- KV for last analysis pass watermarks (so we don't re-analyze the same rows).
+CREATE TABLE IF NOT EXISTS gateway_state (
+    key             TEXT PRIMARY KEY,
+    value           TEXT,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );

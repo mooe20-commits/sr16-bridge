@@ -30,9 +30,24 @@ def init_db() -> None:
     conn.close()
 
 
+def _has_column(conn, table: str, column: str) -> bool:
+    return any(r[1] == column for r in conn.execute(f"PRAGMA table_info({table})"))
+
+
+def migrate() -> None:
+    """Idempotent forward-only migrations for hr_readings schema drift."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    if not _has_column(conn, "hr_readings", "analyzed_at"):
+        conn.execute("ALTER TABLE hr_readings ADD COLUMN analyzed_at TEXT")
+        conn.commit()
+    conn.close()
+
+
 async def enumerate_ring(device: BLEDevice) -> int:
     """Connect, walk services, dump to DB + PROBE-LOG.md. Returns number of characteristics."""
     init_db()
+    migrate()
     count = 0
     session_ts = datetime.now(timezone.utc).isoformat()
 

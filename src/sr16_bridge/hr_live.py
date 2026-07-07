@@ -34,6 +34,20 @@ def init_db() -> None:
     conn.close()
 
 
+def _has_column(conn, table: str, column: str) -> bool:
+    return any(r[1] == column for r in conn.execute(f"PRAGMA table_info({table})"))
+
+
+def migrate() -> None:
+    """Idempotent forward-only migrations for hr_readings schema drift."""
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(DB_PATH)
+    if not _has_column(conn, "hr_readings", "analyzed_at"):
+        conn.execute("ALTER TABLE hr_readings ADD COLUMN analyzed_at TEXT")
+        conn.commit()
+    conn.close()
+
+
 def parse_hr_measurement(payload: bytearray) -> dict:
     """Parse Bluetooth SIG Heart Rate Measurement characteristic (0x2A37).
 
@@ -77,6 +91,7 @@ async def stream_hr(device_addr: str, until_ts: float, started_wall: float) -> t
     Returns (rows, duration_seconds, total_notify_bytes).
     """
     init_db()
+    migrate()
     started_wall = time.time()
     rows: list[tuple] = []
     total_bytes = 0

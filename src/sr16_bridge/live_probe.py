@@ -189,20 +189,48 @@ class _Central(NSObject):
             if cuid.isEqual_(ff01_uuid):
                 self.ff01_char = ch
                 print(f"[CB]   FF01 (TX, notify) found")
-                peripheral.setNotifyValue_forCharacteristic_(True, ch)
+                # Discover DESCRIPTORS on FF01 — CCCD (0x2902) is required for notifications
+                # on some vendor firmwares even though CoreBluetooth normally handles it.
+                peripheral.discoverDescriptorsForCharacteristic_(ch)
             elif cuid.isEqual_(ff02_uuid):
                 self.ff02_char = ch
                 print(f"[CB]   FF02 (RX, write) found")
         self.state = "ready"
 
+    def peripheral_didDiscoverDescriptorsForCharacteristic_error_(
+        self, peripheral, characteristic, error
+    ):
+        """Called for each characteristic after we requested descriptor discovery."""
+        if error:
+            print(f"[CB] discoverDescriptors error: {error}")
+            return
+        descs = characteristic.descriptors() or []
+        cccd_uuid = _cbuuid("2902")
+        for d in descs:
+            print(f"[CB]   desc {d.UUID()} on {characteristic.UUID()}")
+            # If this is the CCCD, enable notifications by writing 0x0001 explicitly.
+            if d.UUID().isEqual_(cccd_uuid):
+                enable = NSData.dataWithBytes_length_(b"\x01\x00", 2)
+                peripheral.writeValue_forDescriptor_(enable, d)
+                print(f"[CB]   wrote CCCD 0x0001 (enable notify) on {characteristic.UUID()}")
+
     def peripheral_didUpdateNotificationStateForCharacteristic_error_(
         self, peripheral, characteristic, error
     ):
+        """CoreBluetooth still emits this when the OS-level subscribe completes."""
         if error:
             print(f"[CB] notify-state error: {error}")
             return
         if characteristic.isNotifying():
             print(f"[CB] NOTIFY ON for {characteristic.UUID()}")
+
+    def peripheral_didWriteValueForDescriptor_error_(
+        self, peripheral, descriptor, error
+    ):
+        if error:
+            print(f"[CB] desc-write error: {error}")
+        else:
+            print(f"[CB] desc-write OK to {descriptor.UUID()}")
 
     def peripheral_didWriteValueForCharacteristic_error_(
         self, peripheral, characteristic, error

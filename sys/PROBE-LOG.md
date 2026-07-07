@@ -93,3 +93,17 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
   operator paired via macOS HID popup → SR16 now stuck in HID-connected state
   blueutil --unpair / --disconnect are no-ops on HID connections
   PENDING OPERATOR: drop HID connection (System Settings disconnect OR sudo killall bluetoothd)
+
+#### SESSION 6 BREAKTHROUGH — char_inventory @ 2026-07-07T18:48:57+00:00
+  SR16 @ 36BE6673-1486-2E90-38E9-3E097DB4CC43  rssi=-83
+  services: 3  (FF00, A00A, 0BC0)
+  chars: 7
+    FF00:FF01  read,write,write-no-response,notify   ← likely TX (notify, ring→us)
+    FF00:FF02  read,write,write-no-response           ← likely RX (write, us→ring)
+    FF00:FF03  read,write,write-no-response           ← control
+    A00A:B002  read,write,write-no-response,notify    ← A00A main
+    A00A:B003  read,notify
+    0BC0:0BC1  write,write-no-response,notify
+    0BC0:0BC2  read,notify
+  capture path: scanner+connect+discoverServices+discoverCharacteristics
+  vendor service = A00A confirmed (matches assumption in protocol.py)

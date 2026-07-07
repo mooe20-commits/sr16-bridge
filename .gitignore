@@ -1,0 +1,5 @@
+# sr16-bridge .gitignore
+.venv/
+__pycache__/
+*.pyc
+.DS_Store

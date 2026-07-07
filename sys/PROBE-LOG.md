@@ -66,3 +66,8 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
 #### enumerate_cocoa @ 2026-07-07T17:44:24.396645+00:00
   discovered=13  selected=4D020B95-547D-323F-F26B-C259B0DC94DA  name='Dryer'
   services=[]
+
+#### hermes_export @ 2026-07-07T18:20:06+00:00
+  days=3  out_dir=/Users/mih/Documents/Obsidian Vault/Health
+  files=3 (2026-07-05, 2026-07-06, 2026-07-07)
+  rows: 236 / 242 / 329   analyses: 0 / 21 / 8

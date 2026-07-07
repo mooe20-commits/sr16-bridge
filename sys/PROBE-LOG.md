@@ -71,3 +71,25 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
   days=3  out_dir=/Users/mih/Documents/Obsidian Vault/Health
   files=3 (2026-07-05, 2026-07-06, 2026-07-07)
   rows: 236 / 242 / 329   analyses: 0 / 21 / 8
+
+#### enumerate_cocoa @ 2026-07-07T18:36:17.213758+00:00
+  discovered=15  selected=36BE6673-1486-2E90-38E9-3E097DB4CC43  name='SR16'
+  services=[]
+
+#### enumerate_cocoa @ 2026-07-07T18:41:45.492474+00:00
+  discovered=17  selected=644E1846-6FB6-9407-E226-D9D12D77477D  name=''
+  services=[]
+
+#### session 6 BLE breakthrough @ 2026-07-07T21:38:00+00:00
+  context: operator confirmed ring wakes but macOS HID-grabs it as a mouse
+  capture_sr16 first successful scan: SR16 at 36BE6673-1486-2E90-38E9-3E097DB4CC43, rssi=-75
+  advertised services: 0xA00A (vendor), 0x180D (Heart Rate)
+  post-connect services: 3 — A00A, 180D, FF00 (FF00 only visible after connect)
+  vendor service UUID confirmed: A00A → 0000A00A-0000-1000-8000-00805F9B34FB
+  patched: src/sr16_bridge/protocol.py — UART_SERVICE_UUID set to A00A
+  pending: RX/TX char UUIDs (need full char walk; script crashed on discoverCharacteristics_forService_ fix verified, restart pending)
+  crashed on: read-only peripheral.delegate = self → fixed to setDelegate_
+  crashed on: CBService.discoverCharacteristics_forService_ → fixed to peripheral.discoverCharacteristics_forService_
+  operator paired via macOS HID popup → SR16 now stuck in HID-connected state
+  blueutil --unpair / --disconnect are no-ops on HID connections
+  PENDING OPERATOR: drop HID connection (System Settings disconnect OR sudo killall bluetoothd)

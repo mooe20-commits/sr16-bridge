@@ -45,10 +45,13 @@ from datetime import datetime, timezone
 from typing import Optional
 
 # ---------- Transport constants (Nordic UART-over-BLE, same as Colmi) ----------
-
-UART_SERVICE_UUID = "6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E"
-UART_RX_CHAR_UUID = "6E400002-B5A3-F393-E0A9-E50E24DCCA9E"  # we WRITE here
-UART_TX_CHAR_UUID = "6E400003-B5A3-F393-E0A9-E50E24DCCA9E"  # we SUBSCRIBE here
+# Confirmed 2026-07-07 via capture_sr16.py: SR16 advertises 16-bit UUID 0xA00A
+# (vendor service) + 0000180D (standard Heart Rate). NOT Nordic UART 6E40FFF0.
+# Base UUID: 0000XXXX-0000-1000-8000-00805F9B34FB → 0xA00A → "0000A00A-0000-1000-8000-00805F9B34FB".
+# We will discover the RX/TX chars on next run (peripheral must walk service).
+UART_SERVICE_UUID = "0000A00A-0000-1000-8000-00805F9B34FB"
+UART_RX_CHAR_UUID = "PLACEHOLDER_RX"  # TBD: discover via capture_sr16
+UART_TX_CHAR_UUID = "PLACEHOLDER_TX"  # TBD: discover via capture_sr16
 
 # ---------- Command opcodes (Colmi R02 — assumed identical for SR16 until proven otherwise) ----------
 

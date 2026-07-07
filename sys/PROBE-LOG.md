@@ -107,3 +107,10 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
     0BC0:0BC2  read,notify
   capture path: scanner+connect+discoverServices+discoverCharacteristics
   vendor service = A00A confirmed (matches assumption in protocol.py)
+
+#### session 6.5 closeout — protocol RE pending @ 2026-07-07T22:00:00+00:00
+  HID-auto-bond dance worked: Forget in System Settings → ring re-advertises → CB connect races the grab
+  capture_sr16 captured full inventory: 3 services, 7 chars
+  live_probe writes succeed (write-ack) but ring never notifies back
+  hypothesis: SR16 uses different opcodes than Colmi R02 tahnok reference
+  next step: nRF Connect sniff OR brute-force 1-byte writes to find which opcode triggers notify

@@ -305,3 +305,53 @@ field includes the full transport.
   Easy to flip if you think of the bytes as a big-endian u16.
 - P37: 0xA3 packets (and other bulks) are retransmitted 4x with identical
   body. Decoders must dedupe by body hash, not by frame number.
+
+---
+
+## Session 11 (2026-07-08 evening) — Path A: protocol.py rewrite
+
+### What we shipped
+- `src/sr16_bridge/protocol.py` — full rewrite to 0xAB model (~500 lines)
+- `src/sr16_bridge/history_sync_offline.py` — replay harness (~200 lines)
+- `src/sr16_bridge/connect_pull.py` — live BLE scaffold (~180 lines)
+- `tests/test_protocol_0ab.py` — 22 unit tests, all pass
+- `HANDOFF-session-11.md` — handoff for session 12
+
+### What we discovered
+1. **0xA3 retransmits are NOT byte-identical.** Only records 1-9 (regular
+   hourly) match across the 4 retransmits. Record 0 (day-summary, marker
+   0xE131) varies in val16 (advances with wall-clock). data12 IS identical.
+   Fix: dedupe per-record, not per-packet. P37 in session 10 was wrong.
+
+2. **Phone→ring writes are fully decoded now.** 78 writes break down as:
+   - 75 × cmd=0x03 (fetch trigger, with sub_type picking the block)
+   - 1 × cmd=0x04 (status query)
+   - 1 × cmd=0x05 (config)
+   - 1 × cmd=0x09 (begin-sync marker)
+   The sub_type field in the segment header (after cmd) selects which
+   block the ring returns:
+   - 0x1A → 16B-record block (today or older day)
+   - 0x17 → 8B-record block (older day)
+   - 0x63 → byte grid
+   - 0x02-0x0D → per-hour 16B blocks (one per metric family)
+
+3. **0x09 begin-sync packet is 15B, not 16B or 17B.** Earlier writeup
+   counted the segment header as 5B (matching bulk records); it's 6B
+   for 0x09 specifically.
+
+4. **Device serial from 0x13 may be bogus.** Last 8B decodes to ASCII
+   "30380000" = "080000" — doesn't match any expected format. May need
+   a different field offset for the real serial, or the ring simply
+   doesn't populate it.
+
+### Test results
+27/27 tests pass:
+- 5 session-10 tests (decode_0ab)
+- 22 new tests (protocol_0ab): packet builders, parsers, dedupe,
+  high-level helpers, constants
+
+### Open for session 12
+- Path B: fresh bugreport at connect-time → service UUID
+- Path C: wire connect_pull.py against live ring (UUID must be real)
+- Path D: 0x67 byte grid semantics (wear bitmap?)
+- 0xA3 metric semantics still unconfirmed (needs corroborating capture)

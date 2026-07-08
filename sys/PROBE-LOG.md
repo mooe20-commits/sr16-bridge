@@ -164,3 +164,31 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
   next: install Wireshark + adb, enable USB debugging + BT HCI snoop on Galaxy,
         trigger RWfit sync, capture btsnoop_hci.log via adb bugreport,
         open in Wireshark → discover SR16 opcodes → patch protocol.py
+
+## 2026-07-08 — session 9 (pivot to Android HCI snoop)
+
+### Tools installed
+- `adb` via `brew install --cask android-platform-tools` → v37.0.0
+- `tshark` via `brew install wireshark` → 4.6.6 (CLI only, no .app — sudo blocked)
+- Both confirmed working.
+
+### Phone state
+- Galaxy S10e (SM_G970F), Android 12 (API 31)
+- adb authorized over USB-C (RF8M31H582A)
+- `mSnoopLogSettingAtEnable = full` — Dev Options toggle took
+- `persist.bluetooth.btsnoopenabled` is empty (Samsung uses settings secure, not prop — snoop still works)
+- App: `com.rw.revivalfit` (NOT `com.koepovksmart.rwfit` — earlier greps missed it; pkg path was different)
+- Activity: `com.rw.revivalfit/com.example.test.ui.testui.TMainRingActivity`
+- Ring state: `(Connected) 38:00:00:00:DE:90 [LE] SR16 (Hogp)` — ACL up for 10+ min
+
+### New tool: decode_snoop.py
+- `src/sr16_bridge/decode_snoop.py` shipped this session
+- Uses tshark headlessly to extract ATT writes from btsnoop_hci.log
+- Tags writes destined for the SR16 (by BD_ADDR 38:00:00:00:DE:90 or vendor char handles 0x000e–0x0013)
+- Emits per-handle write table + first-N hex dumps + protocol.py patch hint
+- Output: `~/health/sr16_captures/decoded_<ts>.md`
+
+### Bugreport cycle
+- First adb bugreport (proc_56c8496e5077) was killed by SIGTERM (process manager, not us)
+- Second bugreport running: proc_1e3fb1135682
+- Will extract + decode the btsnoop_hci.log from the resulting zip

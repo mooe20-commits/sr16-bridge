@@ -81,16 +81,31 @@ DIR_WRITE = 0x01   # phone -> ring
 DIR_NOTIFY = 0x11  # ring  -> phone
 TYPE_CONST = 0x00  # always 0x00 in captures
 
-# GATT handles (from tshark dissection of the snoop). Session 9 finding.
-# The 128-bit service UUID owning these chars is NOT yet captured — Path B.
-UART_WRITE_HANDLE = 0x003E   # phone -> ring
-UART_NOTIFY_HANDLE = 0x0040  # ring  -> phone
+# GATT handles + 128-bit UUIDs (from session-9 snoop, frame 367+372+466 —
+# ATT Read By Group Type Response). Resolution: 2026-07-09, option C).
+#
+# Phone sees 3 services on the SR16 in primary-service-discovery order:
+#   0x1800 (GAP)        handles 0x0001..0x0007
+#   0x1801 (GATT)       handles 0x0008..0x000B
+#   0x1812 (HID / Hogp) handles 0x000C..0x0033   ← ring's HID-over-GATT
+#   0xFF00              handles 0x0034..0x003B   ← vendor secondary
+#   0xA00A              handles 0x003C..0x0041   ← vendor primary (THE ONE)
+#   0x0BC0              handles 0x0042..0xFFFF
+#
+# The vendor transport rides on 0xA00A:
+#   0x003E  16-bit UUID 0xB002  props=0x1E (R+W+WNR+N)  phone -> ring WRITE
+#   0x0040  16-bit UUID 0xB003  props=0x12 (R+N)          ring  -> phone NOTIFY
+#
+# Full 128-bit form is the standard SIG base-UUID alias:
+#   0000XXXX-0000-1000-8000-00805f9b34fb
+UART_SERVICE_UUID = "0000a00a-0000-1000-8000-00805f9b34fb"
+UART_TX_CHAR_UUID = "0000b002-0000-1000-8000-00805f9b34fb"  # phone -> ring (handle 0x003E)
+UART_RX_CHAR_UUID = "0000b003-0000-1000-8000-00805f9b34fb"  # ring  -> phone (handle 0x0040)
+UART_WRITE_HANDLE = 0x003E
+UART_NOTIFY_HANDLE = 0x0040
 
-# Placeholder service UUID. session 11 must replace once Path B returns the
-# real 128-bit UUID from a fresh bugreport.
-UART_SERVICE_UUID = "PLACEHOLDER-0000-0000-0000-000000000000"
-UART_TX_CHAR_UUID = "PLACEHOLDER_TX"
-UART_RX_CHAR_UUID = "PLACEHOLDER_RX"
+# UUID_KNOWN is now True. Lets connect_pull.py run without --force.
+UUID_KNOWN = True
 
 
 # --- Command opcodes (all 11 captured) ----------------------------------

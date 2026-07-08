@@ -49,15 +49,17 @@ from .protocol import (
     make_begin_sync, make_fetch_request, parse_notify, parse_fetch,
     SUB_DATA_16B, CMD_ACK,
 )
+from .protocol import UUID_KNOWN as _PROTOCOL_UUID_KNOWN
 
 
 RING_NAME = "SR16"
 
 
 # ---------------------------------------------------------------------------
-# TODO [Path B]: replace these placeholders once the fresh bugreport is decoded
+# Local gate: True if both (a) the protocol module flagged the UUID real and
+# (b) the literal value doesn't contain the placeholder fragment.
 # ---------------------------------------------------------------------------
-UUID_KNOWN = UART_SERVICE_UUID != "PLACEHOLDER-0000-0000-0000-000000000000"
+UUID_KNOWN = _PROTOCOL_UUID_KNOWN and "PLACEHOLDER" not in UART_SERVICE_UUID
 
 
 async def find_sr16(scan_seconds: int) -> Optional[str]:

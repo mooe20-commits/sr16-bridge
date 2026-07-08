@@ -355,3 +355,53 @@ field includes the full transport.
 - Path C: wire connect_pull.py against live ring (UUID must be real)
 - Path D: 0x67 byte grid semantics (wear bitmap?)
 - 0xA3 metric semantics still unconfirmed (needs corroborating capture)
+
+---
+
+## Session 12 (2026-07-09) — Path B resolved without a fresh bugreport
+
+### Goal
+Resolve the service-UUID blocker (Path B from session 11 handoff).
+
+### What we shipped
+- `src/sr16_bridge/protocol.py` — `UART_SERVICE_UUID`, `UART_TX_CHAR_UUID`, `UART_RX_CHAR_UUID` real (not placeholders)
+- `src/sr16_bridge/connect_pull.py` — imports protocol-level `UUID_KNOWN`; placeholder string check now AND-gated
+- `tests/test_protocol_0ab.py` — 2 new tests pin the UUIDs and SIG base format; suite is 29/29
+- `HANDOFF-session-12.md` — handoff for session 13
+
+### Discovery (option C: query existing snoop)
+Ran `tshark -r btsnoop_hci.log -Y 'btatt.opcode==0x11'` against the
+session-9 capture and found TWO `Read By Group Type Response` frames
+(367, 372). Those frames contain primary-service-discovery responses —
+listing every service the ring exposes, with its 128-bit UUID and
+handle range. **We never needed a fresh bugreport.**
+
+```
+Frame 367: services 0x0001..0x0033 → GAP (0x1800), GATT (0x1801), HID (0x1812)
+Frame 372: services 0x0034..0xFFFF → FF00, A00A (handles 0x003C..0x0041), 0BC0
+```
+
+The vendor transport rides on 0xA00A:
+- handle 0x003E declares char 0xB002 (props 0x1E = R+W+WNR+N) ← phone writes here
+- handle 0x0040 declares char 0xB003 (props 0x12 = R+N)       ← ring notifies here
+
+Full 128-bit form (SIG base-UUID alias):
+```
+0000a00a-0000-1000-8000-00805f9b34fb   # service
+0000b002-0000-1000-8000-00805f9b34fb   # TX (phone -> ring)
+0000b003-0000-1000-8000-00805f9b34fb   # RX (ring  -> phone)
+```
+
+### Test results
+29/29 pass (was 27 — added `test_uart_service_uuid_is_real` and
+`test_uart_uuids_match_bt_sig_base`).
+
+### Recommended next session
+Path C step 2: `connect_pull.py --scan 30` against the live ring. See
+P1, P3 in `~/.hermes/skills/devops/sr16-ring-mac-pitfalls/SKILL.md`
+for the Mac-side HID/sleep gauntlet that will probably bite first.
+If we hit it, the fallback is the known-activity capture for 0xA3
+metric semantics — operator does a 5-min run, then triggers sync.
+
+### Pitfalls captured (encoded in sr16-ring-mac-pitfalls skill)
+- P41: Always query the snoop for ATT primary-service-discovery before declaring a fresh capture needed.

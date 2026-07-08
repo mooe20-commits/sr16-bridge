@@ -25,6 +25,7 @@ from sr16_bridge.protocol import (  # noqa: E402
     MARKER_REGULAR, MARKER_DAY_SUMMARY, SLOT_SECONDS,
     STATUS_FLAG_INITIAL, STATUS_FLAG_RETRY,
     MAGIC, DIR_WRITE, TYPE_CONST,
+    UART_SERVICE_UUID, UART_TX_CHAR_UUID, UART_RX_CHAR_UUID,
     UART_WRITE_HANDLE, UART_NOTIFY_HANDLE,
     make_write_packet, make_fetch_request, make_begin_sync, make_status_query,
     parse_notify, parse_fetch, merge_fetches, dedupe_retransmits,
@@ -280,9 +281,31 @@ def test_markers_are_le_u16():
 
 def test_gatt_handles():
     """Handle 0x003e = WRITE (phone->ring), 0x0040 = NOTIFY (ring->phone).
-    These are the raw ATT handles, not the char UUIDs (which are still TBD)."""
+    These are the raw ATT handles, not the char UUIDs."""
     assert UART_WRITE_HANDLE == 0x003E
     assert UART_NOTIFY_HANDLE == 0x0040
+
+
+def test_uart_service_uuid_is_real():
+    """Pinned by session 12 — derived from the existing session-9 snoop
+    (frame 367 / 372: ATT Read By Group Type Response). If anyone rotates
+    this to a placeholder again, this test fails loudly."""
+    assert UART_SERVICE_UUID == "0000a00a-0000-1000-8000-00805f9b34fb"
+    assert "PLACEHOLDER" not in UART_SERVICE_UUID
+    # Both chars live on the A00A service per primary-service-discovery.
+    assert UART_TX_CHAR_UUID.startswith("0000b002")
+    assert UART_RX_CHAR_UUID.startswith("0000b003")
+    # The protocol module now exports UUID_KNOWN=True to gate live ring pulls.
+    from sr16_bridge.protocol import UUID_KNOWN
+    assert UUID_KNOWN is True
+
+
+def test_uart_uuids_match_bt_sig_base():
+    """All three UUIDs share the SIG base-UUID format. If someone fat-fingers
+    one of these, the BT stack will silently miss the service."""
+    BASE = "-0000-1000-8000-00805f9b34fb"
+    for u in (UART_SERVICE_UUID, UART_TX_CHAR_UUID, UART_RX_CHAR_UUID):
+        assert u.endswith(BASE), f"{u} does not end with the SIG base UUID"
 
 
 if __name__ == "__main__":

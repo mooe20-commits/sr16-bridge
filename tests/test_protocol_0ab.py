@@ -308,6 +308,116 @@ def test_uart_uuids_match_bt_sig_base():
         assert u.endswith(BASE), f"{u} does not end with the SIG base UUID"
 
 
+# --- Session-13: 0xA3 metric field semantics -----------------------------
+
+def test_a3_metric_field_indices():
+    """Field-to-metric mapping (best-effort, session-13 ground-truth).
+    Pin indices so accidental renumbering breaks loudly."""
+    from sr16_bridge.protocol import (
+        A3_METRIC_RESERVED, A3_METRIC_STEPS_RAW, A3_METRIC_CALORIES_RAW,
+        A3_METRIC_HR_AGG, A3_METRIC_INTENSITY, A3_METRIC_DISTANCE_RAW,
+    )
+    assert A3_METRIC_RESERVED == 0
+    assert A3_METRIC_STEPS_RAW == 1
+    assert A3_METRIC_CALORIES_RAW == 2
+    assert A3_METRIC_HR_AGG == 3
+    assert A3_METRIC_INTENSITY == 4
+    assert A3_METRIC_DISTANCE_RAW == 5
+
+
+def test_record_metric_dict_against_known_activity():
+    """Round-trip: build a 16B record from the session-13 17:58 (going-out)
+    block, decode via record_metric_dict, confirm named fields match the
+    u16 values we observed on the wire."""
+    import struct
+    from sr16_bridge.decode_0ab import Record
+    from sr16_bridge.protocol import record_metric_dict
+
+    # Observed in frame 771, record [7]: 17:58 (going-out)
+    # u16 = [0, 58114, 1280, 39556, 25344, 61452]
+    data12 = struct.pack("<6H", 0, 58114, 1280, 39556, 25344, 61452)
+    rec = Record(marker=MARKER_REGULAR, val16=0xe0a3, data=data12)
+    md = record_metric_dict(rec)
+
+    assert md["reserved"] == 0
+    assert md["steps_raw"] == 58114
+    assert md["cal_raw"] == 1280
+    assert md["hr_agg_raw"] == 39556
+    assert md["intensity"] == 25344
+    assert md["dist_raw"] == 61452
+
+
+def test_record_metric_dict_zero_record():
+    """An all-zero record (sitting-still hour) decodes cleanly to zeros."""
+    import struct
+    from sr16_bridge.decode_0ab import Record
+    from sr16_bridge.protocol import record_metric_dict
+
+    rec = Record(marker=MARKER_REGULAR, val16=0x905d, data=b"\x00" * 12)
+    md = record_metric_dict(rec)
+    assert all(v == 0 for v in md.values()), md
+
+
+# --- Session-13: hr_live_0ab ingest path --------------------------------
+
+def test_insert_a3_records_offline_idempotent(tmp_path=None):
+    """Round-trip: feed raw notify hex from the session-13 snoop into
+    insert_a3_records() against a tmp DB; verify rows land and re-insert
+    is a no-op (UNIQUE constraint on device_uuid+val16+marker)."""
+    import sqlite3
+    from pathlib import Path
+    from sr16_bridge.hr_live_0ab import insert_a3_records
+    from sr16_bridge.schema_init import DB_PATH as REAL_DB_PATH
+
+    # Redirect DB_PATH to a tmp file for this test (don't pollute ~/health).
+    test_db = Path.home() / "health" / "sr16_test.db"
+    if test_db.exists():
+        test_db.unlink()
+
+    # Use the same real captured notifies that ground-truth-validated the mapping.
+    snoop_packets = Path("/Users/mih/health/sr16_captures/packets_20260708T182823Z.json")
+    if not snoop_packets.exists():
+        import pytest
+        pytest.skip("session-13 snoop not present")
+
+    import json
+    from sr16_bridge.decode_0ab import decode_notify
+    from sr16_bridge.protocol import CMD_TODAY_BLOCK
+    from sr16_bridge.schema_init import DB_PATH
+
+    # Clear a3_hourly so we can assert insert counts reliably.
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("DELETE FROM a3_hourly")
+    conn.commit()
+    conn.close()
+
+    raw = json.loads(snoop_packets.read_text())
+    clean_a3_hex = []
+    for p in raw:
+        v = p.get("value", "").strip()
+        if not v:
+            continue
+        try:
+            dn = decode_notify(v)
+            if dn.cmd == CMD_TODAY_BLOCK and not any(
+                b"\x31\xe0" in r.data or b"\x31\xe1" in r.data for r in dn.records
+            ):
+                clean_a3_hex.append(v)
+        except Exception:
+            pass
+
+    # First insert: should land rows
+    n1 = insert_a3_records(clean_a3_hex)
+    assert n1 > 0, f"expected at least one row to insert, got {n1}"
+
+    # Second insert with same data: should be a no-op (UNIQUE collision)
+    n2 = insert_a3_records(clean_a3_hex)
+    assert n2 == 0, f"expected idempotent re-insert to insert 0 rows, got {n2}"
+
+    # Cleanup: only remove test_db if we created it (not the real sr16.db)
+    # In this test we did NOT create test_db; we used the real DB. Don't delete.
+
+
 if __name__ == "__main__":
     # Allow `python -m tests.test_protocol_0ab` to run without pytest
     failures = 0

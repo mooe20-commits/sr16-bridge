@@ -439,20 +439,42 @@ class ByteGrid:
     twos: int
 
 
-# --- 0xA3 metric semantics (UNCONFIRMED) --------------------------------
+# --- 0xA3 metric semantics (PARTIALLY CONFIRMED, 2026-07-08) ------------
 
-# The 16B record's 12B data tail is 6 x u16. The most likely layout, per
-# session-10 inference:
-#   [reserved, hr_avg, hr_min, hr_max, steps, calories]
-# These indices let callers reference metrics by name without hardcoding
-# indices everywhere. UNCONFIRMED — needs a second capture with known
-# activity to validate (see HANDOFF-session-10.md "What's NOT yet known").
-A3_METRIC_RESERVED = 0
-A3_METRIC_HR_AVG   = 1
-A3_METRIC_HR_MIN   = 2
-A3_METRIC_HR_MAX   = 3
-A3_METRIC_STEPS    = 4
-A3_METRIC_CALORIES = 5
+# The 16B record's 12B data tail is 6 x u16 LE.
+#
+# Confirmed by session-13 ground-truth capture (sleep / sitting / going-out):
+#   - u16_0: ALWAYS zero in clean packets → reserved/flag
+#   - u16_1, u16_3, u16_5: nonzero in active hours AND in deep sleep hours
+#   - u16_2, u16_4: nonzero in active hours, often zero in sleep
+#
+# Mapping (best-effort, based on coefficient-of-variation + value-range
+# analysis against realistic step/calorie/HR ranges for the activity blocks):
+#
+#   u16_0 = reserved (always 0)
+#   u16_1 = STEPS_RAW         (range 5800-58000; large for active, nonzero for sleep = small steps)
+#   u16_2 = CALORIES_RAW      (range 0-2048; small, often 0 in sleep — most consistent with cal)
+#   u16_3 = ???  (range 23000-62000; very stable when nonzero — could be HR-derived aggregate)
+#   u16_4 = ???  (range 768-37632; high variance — could be activity intensity / active minutes)
+#   u16_5 = DISTANCE_RAW_M    (range 250-61529; meters, 1hr walk = 3000-5000 m)
+#
+# Confidence levels (session-13):
+#   STEPS_RAW        = u16_1  [MEDIUM]  — large value in 1hr walk (58k), zero in sitting
+#   CALORIES_RAW     = u16_2  [HIGH]    — small values, zero in sleep, positive in active hours
+#   DISTANCE_RAW_M   = u16_5  [MEDIUM]  — magnitude plausible for m-per-hour
+#   u16_3            = ???    [LOW]     — stable nonzero, could be HR-aggregate (avg × 100?)
+#   u16_4            = ???    [LOW]     — high variance, unclear purpose
+#
+# To refine: a 2nd capture where the user knows their exact step count and
+# HR max for a walk/run will lock the field-to-metric mapping in one shot.
+# See HANDOFF-session-13.md "Open: field semantics".
+
+A3_METRIC_RESERVED    = 0   # always 0 — flag/alignment
+A3_METRIC_STEPS_RAW   = 1   # step count for the hour (unverified scale)
+A3_METRIC_CALORIES_RAW = 2  # calories for the hour (unverified scale)
+A3_METRIC_HR_AGG      = 3   # possibly HR-derived aggregate (UNCONFIRMED)
+A3_METRIC_INTENSITY   = 4   # possibly active minutes or intensity (UNCONFIRMED)
+A3_METRIC_DISTANCE_RAW = 5  # distance (m or other unit) — UNCONFIRMED scale
 
 
 def record_u16_metrics(r: Record) -> List[int]:
@@ -460,6 +482,24 @@ def record_u16_metrics(r: Record) -> List[int]:
     if len(r.data) != 12:
         raise ValueError(f"expected 12B data tail, got {len(r.data)}")
     return [int.from_bytes(r.data[i * 2:(i + 1) * 2], "little") for i in range(6)]
+
+
+def record_metric_dict(r: Record) -> dict:
+    """Decode a 16B record's data tail into a dict of named metrics.
+
+    Fields with UNCONFIRMED mapping (u16_3, u16_4) are returned under
+    ambiguous keys so callers can still write them to the DB without
+    mislabeling.
+    """
+    u16s = record_u16_metrics(r)
+    return {
+        "reserved":   u16s[A3_METRIC_RESERVED],
+        "steps_raw":  u16s[A3_METRIC_STEPS_RAW],
+        "cal_raw":    u16s[A3_METRIC_CALORIES_RAW],
+        "hr_agg_raw": u16s[A3_METRIC_HR_AGG],       # UNCONFIRMED
+        "intensity":  u16s[A3_METRIC_INTENSITY],    # UNCONFIRMED
+        "dist_raw":   u16s[A3_METRIC_DISTANCE_RAW],
+    }
 
 
 def record_u32_metric(r: Record) -> int:
@@ -511,6 +551,7 @@ __all__ = [
     "parse_notify", "parse_fetch", "parse_device_info", "parse_byte_grid",
     "dedupe_retransmits", "merge_fetches",
     "record_u16_metrics", "record_u32_metric",
-    "A3_METRIC_RESERVED", "A3_METRIC_HR_AVG", "A3_METRIC_HR_MIN",
-    "A3_METRIC_HR_MAX", "A3_METRIC_STEPS", "A3_METRIC_CALORIES",
+    "A3_METRIC_RESERVED", "A3_METRIC_STEPS_RAW", "A3_METRIC_CALORIES_RAW",
+    "A3_METRIC_HR_AGG", "A3_METRIC_INTENSITY", "A3_METRIC_DISTANCE_RAW",
+    "record_metric_dict",
 ]

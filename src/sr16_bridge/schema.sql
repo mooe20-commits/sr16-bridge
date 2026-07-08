@@ -77,3 +77,36 @@ CREATE TABLE IF NOT EXISTS gateway_state (
     value           TEXT,
     updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Session-13: 0xA3 hourly-aggregate records from the SR16 vendor protocol.
+-- These are NOT heart-rate samples — they're per-hour rollups of multiple
+-- metrics (steps, calories, distance, HR aggregate). One row per (date, hour).
+-- Source: live BLE pull via hr_live_0ab.py.
+--
+-- Field semantics (PARTIALLY CONFIRMED 2026-07-08, see protocol.py docstring):
+--   steps_raw       = u16_1 — step count for the hour (unverified scale)
+--   cal_raw         = u16_2 — calories for the hour (unverified scale)
+--   hr_agg_raw      = u16_3 — possibly HR-derived aggregate (UNCONFIRMED)
+--   intensity_raw   = u16_4 — possibly active minutes / intensity (UNCONFIRMED)
+--   dist_raw        = u16_5 — distance (m or other unit, UNCONFIRMED scale)
+--   reserved_u16_0  = u16_0 — always 0 (flag/alignment)
+CREATE TABLE IF NOT EXISTS a3_hourly (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts_utc          TEXT    NOT NULL,         -- ISO8601 of the hour boundary
+    device_uuid     TEXT    NOT NULL,
+    date_local      TEXT    NOT NULL,         -- YYYY-MM-DD in user's TZ
+    hour_local      INTEGER NOT NULL,         -- 0-23
+    val16           INTEGER NOT NULL,         -- ring's seconds-since-midnight-UTC (raw)
+    marker          INTEGER NOT NULL,         -- 0xE031 regular, 0xE131 day-summary
+    steps_raw       INTEGER NOT NULL DEFAULT 0,
+    cal_raw         INTEGER NOT NULL DEFAULT 0,
+    hr_agg_raw      INTEGER NOT NULL DEFAULT 0,
+    intensity_raw   INTEGER NOT NULL DEFAULT 0,
+    dist_raw        INTEGER NOT NULL DEFAULT 0,
+    reserved_u16_0  INTEGER NOT NULL DEFAULT 0,
+    raw_hex         TEXT,
+    ingested_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(device_uuid, val16, marker)
+);
+CREATE INDEX IF NOT EXISTS a3_hourly_ts ON a3_hourly(ts_utc);
+CREATE INDEX IF NOT EXISTS a3_hourly_local ON a3_hourly(date_local, hour_local);

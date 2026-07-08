@@ -145,3 +145,22 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
   next: most likely cause is H3 — BLE encryption / LTK pairing required
     before the ring accepts vendor commands. Next session: phone + nRF
     Connect to sniff the actual vendor app packets.
+
+
+#### subscribe_180d attempt @ 2026-07-08T09:27:43.585179+00:00
+  context: post-session-7, Mac-side standard HR quick-win attempt
+  ring unpaired from macOS (HID Forget in Sys Settings) to clear auto-rebond
+  ring stays asleep after wake; advertise windows too short for our scanner
+  tried: killall bluetoothd, Forget device, power-cycle + charger, tap wake
+  bleak discover() saw SR16 once at UUID 36BE6673-1486-2E90-38E9-3E097DB4CC43
+  scanner filter bug: rejected by MAC form vs BLE UUID form (fixed in code, never tested)
+  scan timeout 180s, ring went back to sleep before connect
+  vendor app = RWfit (Samsung Galaxy, paired once, LTK on phone)
+  PIVOT DECISION: stop macOS 0x180D attempts — ring firmware sleep too aggressive
+  PIVOT TO: Android HCI snoop via Developer Options → btsnoop_hci.log → Wireshark
+  ref: Th0rgal/open_oura (Rust, Oura ring RE, same GATT pattern)
+  ref: ringverse/protocol (multi-vendor ring RE)
+  ref: Gadgetbridge BT Protocol RE wiki
+  next: install Wireshark + adb, enable USB debugging + BT HCI snoop on Galaxy,
+        trigger RWfit sync, capture btsnoop_hci.log via adb bugreport,
+        open in Wireshark → discover SR16 opcodes → patch protocol.py

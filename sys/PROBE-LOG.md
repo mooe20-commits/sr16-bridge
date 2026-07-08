@@ -192,3 +192,116 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
 - First adb bugreport (proc_56c8496e5077) was killed by SIGTERM (process manager, not us)
 - Second bugreport running: proc_1e3fb1135682
 - Will extract + decode the btsnoop_hci.log from the resulting zip
+
+## 2026-07-09 — session 10 (0xAB protocol decode)
+
+### Goal
+Decode the 158 SR16-bound notify packets captured in session 9's bugreport.
+Discovered the 0xA3/0x67/0x73 payload structure and rewrote the wrong
+Colmi-R02 model in protocol.py mentally (separate work in session 10+).
+
+### Approach
+- Load `/Users/mih/health/sr16_captures/packets_20260708T100733Z.json` (250 ATT frames, 158 SR16-bound)
+- Filter to ab11-prefixed notifies from src 38:00:00:00:DE:90
+- Group by length and cmd byte to map packet types
+
+### Cmd distribution (78 ring->phone notifies, all ab11-prefixed)
+| cmd | count | size   | what |
+|-----|-------|--------|------|
+| 0x03 | 51    | 9B     | write-ack echo (51x = 12-13 unique patterns, repeated 4x each) |
+| 0x04 | 3     | 10B    | status response |
+| 0x05 | 2     | 11B    | status response |
+| 0x06 | 4     | 12B    | status response |
+| 0x13 | 5     | 25B    | device info (ends with ASCII serial "3080000") |
+| 0x43 | 3     | 73B    | medium data (4 records of 16B) |
+| 0x53 | 1     | 89B    | medium data (5 records of 16B) |
+| 0x67 | 1     | 109B   | 100B byte grid (values 0/1/2 — wear/activity bitmap) |
+| 0x6B | 3     | 113B   | 13 records of 8B (older day's hourly) |
+| 0x73 | 1     | 121B   | 14 records of 8B (older day's hourly) |
+| 0xA3 | 4     | 169B   | 10 records of 16B (TODAY, with rich 12B data tail) |
+
+### Wire format (CORRECTED — replaces earlier "LEN byte" hypothesis)
+```
+ab <dir> <type> <cmd> [5B segment header] [N x record]
+```
+- ab: 0xAB magic (constant)
+- dir: 0x01 (phone->ring) or 0x11 (ring->phone)
+- type: 0x00 in every observed packet (constant — may be a flag)
+- cmd: 1B opcode
+- segment header (5B): <2B frame-seq> <1B category> <1B sub_type> <1B status_flag>
+  - category: 0x02 = metadata/status, 0x05 = measurement data
+  - sub_type: 0x1a = today, 0x17 = older day, 0x04 = device info, etc.
+  - status_flag: 0x10 mostly; 0x00/0x30 for 0x03 echo responses
+- record (8B or 16B):
+  - 2B marker (on-the-wire bytes "31 e0" or "31 e1")
+  - 2B val16 LE (seconds-since-midnight-UTC-of-day)
+  - 4B or 12B data
+
+The LEN byte (0x00 always) seen in tshark's value field is actually
+the `<type>` byte in the transport, NOT a length field. tshark's value
+field includes the full transport.
+
+### Markers
+- 0xE031 (bytes "31 e0") = regular hourly record
+- 0xE131 (bytes "31 e1") = day-summary record
+  - Position: at START of in-progress day (0xA3 = today)
+  - Or at END of completed day (0x43/0x53/0x6B/0x73)
+  - Day summary's val16 is the END time of the day
+  - Day summary's data carries TOTAL day metrics (steps, calories, etc.)
+
+### val16 = seconds-since-midnight-UTC
+- 16-bit unsigned (wraps at 0xFFFF = 18:12:15)
+- Deltas between regular records: exactly 4110 seconds (68.5 min) — the ring's "slot" duration
+  - One off-by-one jitter seen in 0x6B around the 0xFFFF wrap (4111 instead of 4110)
+
+### Decoded values
+- 0xA3 record 0 (summary): val16=0xFE03 (18:03:47) — strange, may be END of yesterday, not start of today
+  - data12: 6xu16 = [0, 27916, 5888, 49344, 43521, 4188]
+  - Plausible: total_steps=27916, cal=5888 (kcal*10?), dist=49344 (m), ?
+- 0xA3 records 6-9 (afternoon hourly):
+  - 14:49: data12 = [0, 6144, 0, 57901, 768, 32823]
+  - 15:58: data12 = [0, 58114, 1280, 39556, 25344, 61452]
+  - Could be: [0, hr_avg_bpm, hr_min, hr_max, steps, calories] — needs ring data to confirm
+- 0x67 byte grid (100B): 25 ones, 1 two, 74 zeros
+  - Likely 5-min slots (8.3h coverage) OR 6-min slots (10h)
+  - 0=no measurement, 1=valid slot, 2=active/wear slot
+
+### 0xA3 retransmits are byte-identical
+- All 4 0xA3 packets differ only in bytes 4-7 (the 2B frame-seq in segment header)
+- This is a packet retransmit loop, NOT 4 different time samples
+
+### Tool shipped: `src/sr16_bridge/decode_0ab.py`
+- Offline decoder, no IO
+- 270 lines, 0 deps
+- 5 unit tests in `tests/test_decode_0ab.py`, all pass
+- CLI: `python3 -m sr16_bridge.decode_0ab --json <packets.json> --src <mac>`
+
+### What's NOT yet decoded
+- 0xA3 data12 6xu16: unknown field semantics (HR? steps? combined metrics?)
+  - Need second capture with KNOWN activity (run, sleep, rest) to disambiguate
+- 0x6B/0x73 data4 u32: small-int metric (21, 76, 88) — could be steps, cal, or HR samples
+  - 21 BPM = dead, so likely not HR
+  - 21 steps/min = walking pace? 76 cal = 1h of moderate activity?
+- 0x67 byte grid [0,1,2] semantics — needs more captures to find pattern
+
+### What's needed to fully decode
+1. One more Android HCI snoop, captured at the START of a sync (so we get the
+   service-discovery phase and the 128-bit service UUID for handles 0x003e/0x0040)
+2. Ideally: one capture during known activity (running, sleeping) so we can
+   cross-reference 0xA3 data12 values against the real-world activity
+3. (Already known) The 4110 sec/hour slot is the vendor's slot — not a 5-min
+   HR grid as the handoff hypothesized. There is NO 5-min HR grid in this protocol.
+
+### Open blockers (carry to session 11+)
+- 128-bit service UUID for 0x003e/0x0040 (needs new snoop)
+- 0xA3 data12 metric semantics (needs corroborating capture)
+- protocol.py rewrite (Colmi R02 model is still wrong — now we have a clear
+  picture of what to replace it with)
+
+### Pitfalls captured
+- P35: tshark's GATT value field INCLUDES the transport header (ab <dir> <type> <cmd>).
+  The LEN byte hypothesis from earlier sessions was a misread of the type byte.
+- P36: On-wire bytes "31 e0" / "31 e1" read as LE u16 are 0xE031 / 0xE131, NOT 0x31E0 / 0x31E1.
+  Easy to flip if you think of the bytes as a big-endian u16.
+- P37: 0xA3 packets (and other bulks) are retransmitted 4x with identical
+  body. Decoders must dedupe by body hash, not by frame number.

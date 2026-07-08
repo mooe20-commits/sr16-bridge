@@ -114,3 +114,34 @@ manufacturer : company_id 0x06D6 (1750) ← Telink Semiconductor (Colmi / QRing 
   live_probe writes succeed (write-ack) but ring never notifies back
   hypothesis: SR16 uses different opcodes than Colmi R02 tahnok reference
   next step: nRF Connect sniff OR brute-force 1-byte writes to find which opcode triggers notify
+
+#### enumerate_cocoa @ 2026-07-08T08:11:30.208318+00:00
+  discovered=15  selected=36BE6673-1486-2E90-38E9-3E097DB4CC43  name='SR16'
+  services=[]
+
+#### session 7 opcode sweep @ 2026-07-08T11:25:00+00:00
+  context: ring paired as HID Mouse, dropped in Sys Settings, raced sweep in
+  sweep 0x00..0xff (256 writes) to FF02, 0.4s wait per opcode
+  subscribed: FF01 (NOTIFY ON), 0BC2 (NOTIFY ON)
+  CCCD errors persist on A00A:B002 + 0BC0:0BC1 (Code=10 attribute not found)
+  FINAL: notifications received = 0
+  interpretation: SR16 does NOT respond to single-byte writes to FF02 on
+    the FF00-service TX char. protocol shape is NOT Colmi R02 (16-byte
+    cmd+subdata+checksum packet).
+  next: pivot — try writing to A00A:B002 (the true "A00A" vendor channel),
+    or use nRF Connect on phone to sniff opcode table.
+
+#### session 7 A00A probe @ 2026-07-08T11:35:00+00:00
+  context: ring disconnected again, raced probe_a00a in
+  write target: A00A:B002, listen: A00A:B003 (NOTIFY ON, CCCD ok)
+  opcodes sent: 0x01, 0x03, 0x12, 0x13, 0x15, 0x16, 0x19, 0x1A,
+                0xA0, 0xA1, 0xB0, 0xC0
+  result: 0x01 + 0x03 wrote-acked, ring dropped connection after ~6s
+          10 opcodes silently drained (likely buffer-side, no notify ack)
+  FINAL: 0 notifications on B003
+  interpretation: SR16 does NOT respond to 16-byte Colmi-style packets
+    on ANY of FF02 (FF00-RX) OR B002 (A00A-RX). The protocol is
+    a fundamentally different shape.
+  next: most likely cause is H3 — BLE encryption / LTK pairing required
+    before the ring accepts vendor commands. Next session: phone + nRF
+    Connect to sniff the actual vendor app packets.

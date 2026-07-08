@@ -405,3 +405,41 @@ metric semantics — operator does a 5-min run, then triggers sync.
 
 ### Pitfalls captured (encoded in sr16-ring-mac-pitfalls skill)
 - P41: Always query the snoop for ATT primary-service-discovery before declaring a fresh capture needed.
+
+---
+
+## Session 12.5 (2026-07-09 evening) — Path C attempt + closeout
+
+### Goal
+Live ring pull from Mac using the new UUIDs.
+
+### What worked
+- `src/sr16_bridge/live_pull.py` — new PyObjC-based live pull harness
+- Scan → connect → discoverServices(A00A) → discoverCharacteristics(B002, B003)
+- All 3 services reachable: FF00, A00A, 0BC0 (matches session 6.5)
+- B002 props=30, B003 props=18 (R, Notify confirmed)
+
+### What didn't
+- `setNotifyValue_forCharacteristic_(True, B003)` returned success but **0 notifies
+  arrived** after sending the fetch packet. Suspected: P6 CCCD write window too short,
+  or ring needs vendor keep-alive (P3) to wake the data path.
+- `retrievePeripherals_` returns 0 when phone's Hogp link is active, so scan-with-race
+  is the only route.
+
+### Diagnostic findings (saved as P42 in skill)
+- CoreBluetooth re-numbers ATT handles: snoop 0x3E/0x40 → CB 0x3D/0x3F (off-by-one).
+  Cause: likely HID-profile pairing vs Hogp-only pairing leads to different GATT DB
+  enumeration. Fix: use char UUIDs, not handles, on Mac.
+
+### Decision
+Stop chasing Mac-side live pull — P1/P3 is a hardware-OS-level state, not a code bug.
+The phone-side known-activity snoop is strictly better for the highest-value open
+question (0xA3 6×u16 metric semantics) and avoids P1/P3 entirely.
+
+### Next session
+1. 5-min known-activity capture on phone (operator does walk/run)
+2. Trigger RWfit sync during/right after the activity
+3. adb bugreport → extract btsnoop_hci.log
+4. decode_snoop.py + decode_0ab.py → pinpoint HR avg/min/max/steps/cal layout
+5. Then port `hr_live.py` from 0x180D HR to 0xAB (now that we know the metrics)
+

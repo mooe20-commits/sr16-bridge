@@ -96,15 +96,23 @@ async def sync_today_block(client: BleakClient, sub_type: int = SUB_DATA_16B):
     def on_notify(_sender, data: bytearray) -> None:
         queue.put_nowait(bytes(data))
 
-    # TODO: filter by handle 0x0040 once bleak version is pinned. Newer
-    # bleak versions pass (characteristic, data) — handle check goes on
-    # the characteristic handle.
-    await client.start_notify(UART_NOTIFY_HANDLE, on_notify)
+    # Prefer char UUID over ATT handle — macOS CoreBluetooth sometimes
+    # remaps handle numbers (observed in session 12: handle 0x40 raised
+    # "Characteristic 64 was not found" while 0xb003 worked). Falls back
+    # to handle if the UUID form isn't resolvable.
+    notify_spec = UART_RX_CHAR_UUID
+    write_spec = UART_TX_CHAR_UUID
+    try:
+        await client.start_notify(notify_spec, on_notify)
+    except Exception:
+        await client.start_notify(UART_NOTIFY_HANDLE, on_notify)
 
     # Send the fetch request
     pkt = make_fetch_request(sub_type, frame_seq=1)
-    # Use the WRITE char UUID if known, else fall back to handle
-    await client.write_gatt_char(UART_RX_CHAR_UUID, pkt, response=False)
+    try:
+        await client.write_gatt_char(write_spec, pkt, response=False)
+    except Exception:
+        await client.write_gatt_char(UART_WRITE_HANDLE, pkt, response=False)
 
     # Drain until idle
     notifies = []
@@ -117,7 +125,10 @@ async def sync_today_block(client: BleakClient, sub_type: int = SUB_DATA_16B):
         if len(notifies) > 20:  # safety: don't loop forever
             break
 
-    await client.stop_notify(UART_NOTIFY_HANDLE)
+    try:
+        await client.stop_notify(UART_RX_CHAR_UUID)
+    except Exception:
+        await client.stop_notify(UART_NOTIFY_HANDLE)
     if not notifies:
         return None
     from .protocol import merge_fetches

@@ -439,6 +439,79 @@ class ByteGrid:
     twos: int
 
 
+@dataclass
+class StatusResponse:
+    """Parsed cmd 0x04 / 0x05 / 0x06 status notify.
+
+    Per handoff-2026-07-13-night:
+        cmd 0x04 last byte:  1-2 byte payload, 143 records
+        cmd 0x05 last 2B:    small payload, 94 records
+        cmd 0x06 last 2B:    counter 0x0ffc..0x106c, decreases by 0x07
+                             per emission — possibly live HR or live steps.
+    """
+    cmd: int               # 0x04, 0x05, or 0x06
+    frame_seq: int
+    category: int
+    sub_type: int
+    status_flag: int
+    body: bytes             # full body bytes (between segment header and end)
+    payload: bytes          # last 1-2 bytes (the "live value" if any)
+
+    @property
+    def payload_u16(self) -> Optional[int]:
+        """Last 2 bytes interpreted as little-endian u16, or None."""
+        if len(self.payload) >= 2:
+            return int.from_bytes(self.payload[-2:], "little")
+        return None
+
+
+def parse_status_response(d: DecodedNotify) -> StatusResponse:
+    """Parse a status notify (cmd 0x04/0x05/0x06) into a StatusResponse."""
+    if not d.is_status:
+        raise ValueError(f"not a status response: 0x{d.cmd:02x}")
+    payload = d.body[-2:] if len(d.body) >= 2 else d.body
+    return StatusResponse(
+        cmd=d.cmd,
+        frame_seq=d.segment.frame_seq,
+        category=d.segment.category,
+        sub_type=d.segment.sub_type,
+        status_flag=d.segment.status_flag,
+        body=bytes(d.body),
+        payload=bytes(payload),
+    )
+
+
+def extract_smuggled_records(d: DecodedNotify) -> List[Record]:
+    """Extract 16B records smuggled inside a cmd 0x13 device-info body.
+
+    Per handoff-2026-07-13-night finding #5: a 0x13 packet's body can contain
+    one or more 16B records (with embedded 0xE031/0xE731/0xE831 markers)
+    wrapped inside the body. The regular decode_notify parses them as a
+    flat body because 0x13 isn't a bulk opcode — this helper re-scans the
+    body and pulls out the records.
+
+    The smuggled record layout matches the bulk 16B record format:
+        [2B marker LE][2B val16 LE][12B data = 6xu16]
+    """
+    if d.cmd != CMD_DEVICE_INFO:
+        return []
+    out: List[Record] = []
+    b = d.body
+    i = 0
+    while i + 16 <= len(b):
+        marker = b[i] | (b[i + 1] << 8)
+        # Only extract known record markers — skip ASCII serial tail etc.
+        if marker in (MARKER_REGULAR, 0xE031, 0xE131, 0xE631,
+                      0xE731, 0xE831):
+            val16 = b[i + 2] | (b[i + 3] << 8)
+            data = bytes(b[i + 4:i + 16])
+            out.append(Record(marker=marker, val16=val16, data=data))
+            i += 16
+        else:
+            i += 1
+    return out
+
+
 # --- 0xA3 metric semantics (PARTIALLY CONFIRMED, 2026-07-08) ------------
 
 # The 16B record's 12B data tail is 6 x u16 LE.
@@ -549,6 +622,8 @@ __all__ = [
     "make_write_packet", "make_fetch_request", "make_begin_sync",
     "make_status_query",
     "parse_notify", "parse_fetch", "parse_device_info", "parse_byte_grid",
+    "parse_status_response", "extract_smuggled_records",
+    "StatusResponse",
     "dedupe_retransmits", "merge_fetches",
     "record_u16_metrics", "record_u32_metric",
     "A3_METRIC_RESERVED", "A3_METRIC_STEPS_RAW", "A3_METRIC_CALORIES_RAW",

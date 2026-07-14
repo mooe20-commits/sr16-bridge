@@ -95,8 +95,9 @@ CREATE TABLE IF NOT EXISTS a3_hourly (
     ts_utc          TEXT    NOT NULL,         -- ISO8601 of the hour boundary
     device_uuid     TEXT    NOT NULL,
     date_local      TEXT    NOT NULL,         -- YYYY-MM-DD in user's TZ
-    hour_local      INTEGER NOT NULL,         -- 0-23
-    val16           INTEGER NOT NULL,         -- ring's seconds-since-midnight-UTC (raw)
+    hour_local      INTEGER NOT NULL,         -- 0-23 in operator TZ
+    hour_utc        INTEGER NOT NULL DEFAULT 0, -- 0-23 in UTC (session-15)
+    val16           INTEGER NOT NULL,         -- ring's seconds-since-midnight (raw)
     marker          INTEGER NOT NULL,         -- 0xE031 regular, 0xE131 day-summary
     steps_raw       INTEGER NOT NULL DEFAULT 0,
     cal_raw         INTEGER NOT NULL DEFAULT 0,
@@ -110,3 +111,26 @@ CREATE TABLE IF NOT EXISTS a3_hourly (
 );
 CREATE INDEX IF NOT EXISTS a3_hourly_ts ON a3_hourly(ts_utc);
 CREATE INDEX IF NOT EXISTS a3_hourly_local ON a3_hourly(date_local, hour_local);
+
+-- Session-15 (handoff-2026-07-13-night): cmd 0x04 / 0x05 / 0x06 status
+-- responses and cmd 0x13 device-info bodies (currently silently dropped).
+-- Status responses (esp. cmd 0x06) carry a 2B counter that may be live HR
+-- or live steps. Each row = one ring->phone notify from a status opcode.
+CREATE TABLE IF NOT EXISTS status_events (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts_utc          TEXT    NOT NULL,         -- ISO8601 of the notify
+    device_uuid     TEXT    NOT NULL,
+    cmd             INTEGER NOT NULL,         -- 0x04 / 0x05 / 0x06 / 0x13
+    frame_seq       INTEGER NOT NULL,
+    category        INTEGER NOT NULL,
+    sub_type        INTEGER NOT NULL,
+    status_flag     INTEGER NOT NULL,
+    body_hex        TEXT    NOT NULL,         -- full body bytes hex
+    payload_hex     TEXT,                     -- last 1-2 bytes (live value) hex
+    payload_u16     INTEGER,                  -- last 2 bytes LE, or NULL
+    raw_hex         TEXT,                     -- full notify for forensics
+    snoop_file      TEXT,                     -- source snoop path
+    ingested_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS status_events_ts ON status_events(ts_utc);
+CREATE INDEX IF NOT EXISTS status_events_cmd ON status_events(cmd);

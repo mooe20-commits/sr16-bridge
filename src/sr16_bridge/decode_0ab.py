@@ -101,6 +101,8 @@ class DecodedNotify:
     cmd: int                       # 1B opcode
     transport: TransportHeader
     segment: SegmentHeader
+    body: bytes = b""              # bytes between segment header and records/raw_data
+                                  # (P52 — needed for cmd 0x04/05/06/0x13 status/info)
     records: List[Record] = field(default_factory=list)
     raw_data: Optional[bytes] = None  # for 0x67-style raw byte grids
 
@@ -111,6 +113,16 @@ class DecodedNotify:
     @property
     def is_byte_grid(self) -> bool:
         return self.cmd == 0x67
+
+    @property
+    def is_status(self) -> bool:
+        """0x04 / 0x05 / 0x06 status responses (carries body bytes only,
+        no records)."""
+        return self.cmd in (0x04, 0x05, 0x06)
+
+    @property
+    def is_device_info(self) -> bool:
+        return self.cmd == 0x13
 
     @property
     def record_size(self) -> int:
@@ -197,12 +209,19 @@ def decode_notify(value: str | bytes) -> DecodedNotify:
     seg, off = parse_segment_header(b, off)
     d = DecodedNotify(cmd=cmd, transport=t, segment=seg)
     if d.is_byte_grid:
+        d.body = bytes(b[off:])
         d.raw_data = bytes(b[off:])
     elif d.is_bulk:
         rec_size = d.record_size
         nrec = (len(b) - off) // rec_size
+        body_end = off + nrec * rec_size
+        d.body = bytes(b[off:body_end]) if body_end > off else b""
         for i in range(nrec):
             d.records.append(parse_record(b, off + i * rec_size, rec_size))
+    else:
+        # Status responses (0x04/0x05/0x06) and device info (0x13) — the
+        # payload lives entirely in `body`. Echoes (0x03) also land here.
+        d.body = bytes(b[off:])
     return d
 
 
@@ -260,6 +279,13 @@ def format_decoded(d: DecodedNotify) -> str:
         lines.append(
             f"duration:  {d.duration_seconds}s = {d.duration_seconds / 60:.1f}min"
         )
+    else:
+        # status / device-info / echo
+        lines.append(f"body:      {d.body.hex()}  ({len(d.body)}B)")
+        try:
+            lines.append(f"body ascii: {d.body.decode('ascii', errors='replace')}")
+        except Exception:
+            pass
     return "\n".join(lines)
 
 

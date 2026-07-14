@@ -16,6 +16,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from sr16_bridge.protocol import (  # noqa: E402
@@ -499,12 +501,70 @@ def test_extract_smuggled_records_no_marker_returns_empty():
     """A 0x13 packet with no record markers returns no records."""
     # Synthetic 0x13 with all-zero body
     import struct
-    pkt = bytearray([0xAB, 0x11, 0x00, CMD_DEVICE_INFO])
-    pkt.extend(struct.pack("<H", 0x0001))
+    pkt = bytearray()
+    pkt.extend(b"\xab\x11\x00\x13")  # transport + cmd 0x13
     pkt.extend(b"\x02\x01\x00")   # seg header cat/sub/flag
     pkt.extend(b"\x00" * 16)      # all-zero body
     d = parse_notify(bytes(pkt))
     assert extract_smuggled_records(d) == []
+
+
+# --- Session-17 (Jul 14 2026): cmd 0x09 record envelopes (P66b) -----------
+
+def test_parse_cmd_0x09_record_envelope():
+    """cmd 0x09 packets in the Jul-14 snoop carry a 6-byte body = marker(2)
+    + val16(2) + tail(2). Verify the parser builds a single padded Record."""
+    # Real hex from the Jul-14 snoop: marker=0xE831, val16=40412, tail=0x0046
+    # body bytes: 31 e8 dc 9d 46 00
+    val = "ab1100091aa202051031e8dc9d4600"
+    d = parse_notify(val)
+    assert d.cmd == 0x09
+    assert d.is_record_envelope is True
+    assert d.is_bulk is False        # 0x09 is single-record, not bulk
+    assert len(d.records) == 1
+    r = d.records[0]
+    assert r.marker == 0xE831
+    assert r.val16 == 40412
+    # data = tail (2B) + zeros (10B) to keep 16B-record shape
+    assert r.data[:2].hex() == "4600"
+    assert r.data[2:] == b"\x00" * 10
+
+
+def test_parse_cmd_0x09_short_body_no_record():
+    """If the body is <6B (truncated packet), no Record is constructed
+    but the body is preserved."""
+    # 5-byte body — too short for marker+val16+tail
+    val = "ab1100090102030405"
+    d = parse_notify(val)
+    assert d.cmd == 0x09
+    assert d.is_record_envelope is False
+    assert d.records == []
+
+
+def test_parse_all_jul14_cmd_0x09_envelopes():
+    """Round-trip the 45 cmd 0x09 notifies from the Jul-14 snoop through
+    parse_notify; verify all yield records with marker=0xE831."""
+    import json, pathlib
+    cached = pathlib.Path("/tmp/jul14_notify.json")
+    if not cached.exists():
+        pytest.skip("Jul-14 snoop cache not present")
+    packets = json.loads(cached.read_text())
+    parsed = [parse_notify(p["value"]) for p in packets if p["cmd"] == 0x09]
+    assert len(parsed) == 45
+    # Every cmd 0x09 envelope has exactly one record
+    assert all(len(d.records) == 1 for d in parsed)
+    # All markers are 0xE831 (the new third firmware variant — P66)
+    assert all(d.records[0].marker == 0xE831 for d in parsed)
+    # val16 ranges 15287..51422 (4-min buckets covering 04:14-14:17 UTC)
+    vals = sorted({d.records[0].val16 for d in parsed})
+    assert min(vals) == 15287
+    assert max(vals) == 51422
+    # 4-min bucket cadence: consecutive (deduped) val16s differ by 256 sec
+    deltas = [b - a for a, b in zip(vals, vals[1:])]
+    # The dominant delta is 256 (4 min × 60); allow some outliers
+    from collections import Counter
+    top = Counter(deltas).most_common(3)
+    assert top[0][0] in (256, 512)  # 256 = 4min, 512 = 8min double-bucket
 
 
 if __name__ == "__main__":

@@ -4,6 +4,31 @@ All notable changes, newest first.
 
 ---
 
+## [session-17] — 2026-07-14 (afternoon)
+
+### Major protocol discovery: cmd 0x09 envelopes (per-record streaming)
+
+**Old assumption:** ring streams bulk data via cmd 0xA3/0x43/0x6B/0x73 blocks (each packet carrying 5-14 records).
+
+**Reality (this session):** the Jul-14 snoop contains **zero** cmd 0xA3/0x43/0x6B/0x73 notifies. The ring streams ONE record per packet inside a **cmd 0x09 envelope** (~15B total: `ab 11 00 09 <frame_seq> <cat=0x05> <sub_type> <status=0x10> <body=6B>`). The 6-byte body = `marker(2) + val16(2) + tail(2)`.
+
+**Bucket cadence:** val16 advances 256 sec per record = **4-minute buckets** (NOT hourly). Explains the "irregular 300-2500 sec deltas" from P66.
+
+**Walk-window data:** 15 cmd 0x09 envelopes with val16 41040-46680 (walk was 11:24-12:58 UTC = val16 41040-46680). BUT — only the 2-byte `tail` field carries data (values 87→62 decreasing monotonically — a sequence counter, not a metric). The 0x09 envelopes' "data" is just a remaining-record counter, NOT steps/cal/dist/HR.
+
+**Code changes:**
+- `decode_0ab.py`: new `is_record_envelope` property + cmd 0x09 branch in `decode_notify()` builds a 12B-padded Record from the 6-byte body. `tail` is the only meaningful field; remaining 10B is zero-padded to keep 16B-record shape.
+- `ingest_snoop_to_db.py`: added `0x09` to `is_bulk_cmd()` so 0x09 envelopes route to the bulk-records path; their single Record then gets ingested to `a3_hourly` with `tail` → `reserved_u16_0`.
+- `tests/test_protocol_0ab.py`: +3 tests covering single-envelope parse, short-body graceful-degrade, and round-trip of all 45 real Jul-14 envelopes. Test count: 39 → 42.
+
+**Result of the field-mapping question:** walk data IS in the snoop, but only as 0x09 envelopes with sequence-counter `tail` values. The actual metric values for the walk window (val16 41040-46680) are NOT in the ring's BLE-visible buffer — they live on the ring but don't reach BLE during this sync. The 0xA3 bulk blocks at val16 57484-61594 (16:00-17:00 UTC) DO have full data, but that's the post-sync state.
+
+**Next-session pickup:** fresh capture during a known activity (P65 Option B pattern) is still the path to lock field semantics. Re-attach capture so the ring's BLE buffer gets re-populated mid-walk.
+
+**Pitfall added (P66b in sr16-ring-mac-pitfalls):** documents the cmd 0x09 envelope structure + the fact that 0x09 envelopes carry only sequence-counter data, not metrics.
+
+---
+
 ## [session-16b] — 2026-07-14 (afternoon)
 
 ### Step B attempt — known-activity walk + field mapping

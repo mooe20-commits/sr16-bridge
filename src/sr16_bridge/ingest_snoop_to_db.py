@@ -144,6 +144,8 @@ def is_bulk_cmd(cmd: int) -> bool:
         CMD_BLOCK_8B_13REC,   # 0x6B
         CMD_BLOCK_8B_14REC,   # 0x73
         CMD_TODAY_BLOCK,      # 0xA3
+        0x09,                 # cmd 0x09 record envelope (per-record streaming,
+                              #           see P66b). Body=marker+val16+2B tail.
     )
 
 

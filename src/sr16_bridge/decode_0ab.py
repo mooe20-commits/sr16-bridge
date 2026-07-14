@@ -108,7 +108,16 @@ class DecodedNotify:
 
     @property
     def is_bulk(self) -> bool:
+        """Bulk-block packets (multiple records). 0x09 is also record-bearing
+        but carries a single record per envelope (per-record streaming)."""
         return self.cmd in (0x43, 0x53, 0x6B, 0x73, 0xA3)
+
+    @property
+    def is_record_envelope(self) -> bool:
+        """cmd 0x09 envelopes carry one 6B body = marker(2)+val16(2)+tail(2).
+        Per-record streaming used by newer ring firmware (Jul-14 snoop)
+        instead of bulk blocks — see P66b in sr16-ring-mac-pitfalls."""
+        return self.cmd == 0x09 and len(self.body) >= 6
 
     @property
     def is_byte_grid(self) -> bool:
@@ -218,6 +227,17 @@ def decode_notify(value: str | bytes) -> DecodedNotify:
         d.body = bytes(b[off:body_end]) if body_end > off else b""
         for i in range(nrec):
             d.records.append(parse_record(b, off + i * rec_size, rec_size))
+    elif d.cmd == 0x09:
+        # Record envelope (per-record streaming). Body = marker(2)+val16(2)+tail(2).
+        # Pad tail to a 12B data field (matches 16B-record layout) so downstream
+        # consumers can treat it uniformly. See P66b.
+        d.body = bytes(b[off:])
+        if len(d.body) >= 6:
+            marker = d.body[0] | (d.body[1] << 8)
+            val16 = d.body[2] | (d.body[3] << 8)
+            tail = d.body[4:6]
+            d.records.append(Record(marker=marker, val16=val16,
+                                    data=tail + b"\x00" * 10))
     else:
         # Status responses (0x04/0x05/0x06) and device info (0x13) — the
         # payload lives entirely in `body`. Echoes (0x03) also land here.

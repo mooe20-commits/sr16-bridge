@@ -4,7 +4,26 @@ All notable changes, newest first.
 
 ---
 
-## [session-16] — 2026-07-14
+## [session-16b] — 2026-07-14 (afternoon)
+
+### Step B attempt — known-activity walk + field mapping
+
+**Walk protocol:** baseline HR 65 bpm → walked 200 steps (Samsung Health counted 515, operator estimate ~400-500) → after-walk HR 62 bpm → sync done. Captured 4.9 MB snoop via `adb bugreport`.
+
+**Pipeline:** new 0xE831 marker variant — all 16 records from the fresh snoop carry marker 0xE831 (not 0xE731 from the Jul-13 snoop). 7 0xA3 fetches in the snoop, all returning val16_range=169..61594.
+
+**Result: field mapping NOT locked.** None of the 6 u16 fields incremented by a clean ×1/×10/×100 of 500 between pre-walk and post-walk records. The walk happened in the val16=41044→57484 window, but those records are all zeros (sleep). The first non-zero post-walk record is val16=57484 (15:58 UTC = 17:58 EEST) with steps_raw=13312, cal_raw=0, dist_raw=32889, hr_agg=38472, intensity=1536.
+
+**Honest assessment:** the 0xE831 records appear to encode something other than standard step/calorie/distance/HR aggregates. The scale and pattern don't match RWfit's daily totals (4647 steps / 3.79 km / 166 kcal). Possibilities:
+- Different firmware's metric encoding (decimeters vs meters, raw sensor ticks vs aggregated counts)
+- Different time-bucket semantics (5-min active windows vs hourly rollups)
+- The 0xA3 fetch in the fresh snoop returned pre-sync state, not post-sync state
+
+**See HANDOFF-session-16.md for full analysis and next-step options.**
+
+---
+
+## [session-16] — 2026-07-14 (morning)
 
 ### Step A: Decode pipeline hardening (handoff-2026-07-13-night)
 

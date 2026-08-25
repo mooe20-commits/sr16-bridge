@@ -2,7 +2,7 @@
 
 Local BLE bridge from the SR16 smart ring to a private SQLite store. All analysis runs locally on this Mac — no cloud, no phone, no vendor app.
 
-**Current status: scaffold + live-HR code in place, end-to-end verification pending.**
+**Current status: active development — live-HR ingestion is implemented; BLE interoperability and end-to-end validation are ongoing.**
 
 See `HANDOFF-2026-07-07.md` for the full session log and the single acceptance test that unblocks session 2.
 
